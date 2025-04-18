@@ -1,0 +1,55 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Учебные планы{% endblock %}
+
+{% block content %}
+<h2>📘 Учебный план</h2>
+
+<!-- Вкладки -->
+<div style="margin-bottom: 20px;">
+    {% for tab in tabs %}
+        <a href="?tab={{ tab }}" style="margin-right: 10px;
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            background-color: {% if tab == active_tab %}#def{% else %}#fff{% endif %};
+            text-decoration: none;">
+            {{ tab }} класс
+        </a>
+    {% endfor %}
+</div>
+
+<!-- Таблица предметов -->
+<table border="1" cellpadding="8" cellspacing="0">
+    <thead>
+        <tr>
+            <th>Предмет</th>
+            <th>Часов в неделю</th>
+            <th>Действия</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in entries %}
+        <tr>
+            <td>{{ entry.subject.name }}</td>
+            <td>{{ entry.hours_per_week }}</td>
+            <td>
+                <form method="post" style="display: inline;">
+                    {% csrf_token %}
+                    <button name="delete" value="{{ entry.id }}" onclick="return confirm('Удалить запись?')">🗑️</button>
+                </form>
+            </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3">Нет предметов в плане</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Форма добавления -->
+<h3 style="margin-top: 20px;">➕ Добавить предмет в {{ active_tab }} класс</h3>
+<form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">💾 Добавить</button>
+</form>
+
+{% endblock %}

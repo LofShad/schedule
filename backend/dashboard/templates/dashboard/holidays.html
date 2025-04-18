@@ -1,0 +1,47 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Выходные дни{% endblock %}
+
+{% block content %}
+<h2>📆 Выходные дни {{ year }}</h2>
+
+<form method="post">
+    {% csrf_token %}
+    <div style="display: flex; flex-wrap: wrap; gap: 20px;">
+        {% for month in months %}
+        <div style="border: 1px solid #ccc; padding: 10px; width: 220px;">
+            <h4 style="text-align: center;">{{ month.name }}</h4>
+            <div style="display: flex; flex-wrap: wrap;">
+                {% for day in month.days %}
+                    <label style="
+                        width: 30px;
+                        height: 30px;
+                        margin: 2px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        border: 1px solid #aaa;
+                        cursor: pointer;
+                        background-color: {% if day in holidays %}#f88{% else %}#fff{% endif %};"
+                        onclick="toggleCheckbox(this)">
+                        <input type="checkbox" name="selected_dates" value="{{ day|date:'Y-m-d' }}"
+                               style="display: none;" {% if day in holidays %}checked{% endif %}>
+                        <span style="font-size: 12px;">{{ day.day }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <br>
+    <button type="submit">💾 Сохранить изменения</button>
+</form>
+
+<script>
+function toggleCheckbox(label) {
+    const checkbox = label.querySelector("input[type='checkbox']");
+    checkbox.checked = !checkbox.checked;
+    label.style.backgroundColor = checkbox.checked ? "#f88" : "#fff";
+}
+</script>
+{% endblock %}

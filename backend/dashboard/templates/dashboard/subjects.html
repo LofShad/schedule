@@ -1,0 +1,58 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Предметы{% endblock %}
+
+{% block content %}
+<div style="display: flex; gap: 40px;">
+    <!-- Левая колонка: таблица предметов -->
+    <div style="width: 60%;">
+        <h2>📚 Список предметов</h2>
+        <table border="1" cellpadding="8" cellspacing="0" width="100%">
+            <thead>
+                <tr>
+                    <th>Название</th>
+                    <th>Предметная область</th>
+                    <th>Сложность</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for subject in subjects %}
+                <tr>
+                    <td>{{ subject.name }}</td>
+                    <td>{{ subject.get_subject_area_display }}</td>
+                    <td>{{ subject.get_difficulty_display }}</td>
+                    <td>
+                        <a href="?edit={{ subject.id }}">✏️</a>
+                        <a href="?delete={{ subject.id }}" onclick="return confirm('Удалить предмет?')">🗑️</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5">Нет предметов</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Правая колонка: форма добавления/редактирования -->
+    <div style="width: 40%;">
+        <h2>{{ edit_mode|yesno:"✏️ Редактировать предмет,➕ Добавить предмет" }}</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% if edit_id %}
+            <input type="hidden" name="subject_id" value="{{ edit_id }}">
+            {% endif %}
+
+            <label>Название:</label><br>
+            {{ form.name }}<br><br>
+
+            <label>Предметная область:</label><br>
+            {{ form.subject_area }}<br><br>
+
+            <label>Сложность:</label><br>
+            {{ form.difficulty }}<br><br>
+
+            <button type="submit">💾 Сохранить</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

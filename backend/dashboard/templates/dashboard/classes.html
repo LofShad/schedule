@@ -1,0 +1,53 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Классы{% endblock %}
+
+{% block content %}
+<div style="display: flex; gap: 40px">
+    <div style="width: 60%;">
+        <h2>🏫 Список классов</h2>
+        <table border="1" cellpadding="8" cellspacing="0" width="100%">
+            <thead>
+                <tr>
+                    <th>Класс</th>
+                    <th>Смена</th>
+                    <th>Учебный план</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cls in classes %}
+                <tr>
+                    <td>{{ cls.grade.number }}{{ cls.letter }}</td>
+                    <td>{{ cls.get_shift_display }}</td>
+                    <td>
+                        {% if cls.study_plan %}
+                            {{ cls.study_plan.name }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="?edit={{ cls.id }}">✏️</a>
+                        <a href="?delete={{ cls.id }}" onclick="return confirm('Удалить класс?')">🗑️</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4">Нет классов</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div style="width: 40%;">
+        <h2>{{ edit_mode|yesno:"✏️ Редактировать класс,➕ Добавить класс" }}</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% if edit_id %}
+            <input type="hidden" name="class_id" value="{{ edit_id }}">
+            {% endif %}
+            {{ form.as_p }}
+            <button type="submit">💾 Сохранить</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

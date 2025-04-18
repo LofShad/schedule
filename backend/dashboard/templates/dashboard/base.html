@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Админка{% endblock %}</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            font-family: sans-serif;
+        }
+        .sidebar {
+            width: 220px;
+            background-color: #f4f4f4;
+            height: 100vh;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            position: fixed;
+        }
+        .sidebar a {
+            display: block;
+            padding: 10px;
+            color: #333;
+            text-decoration: none;
+            margin-bottom: 10px;
+        }
+        .sidebar a:hover {
+            background-color: #ddd;
+        }
+        .content {
+            margin-left: 240px;
+            padding: 20px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>Меню</h3>
+        <a href="{% url 'schedule' %}">📅 Расписание</a>
+        <a href="{% url 'study_plans' %}">📘 Учебные планы</a>
+        <a href="{% url 'subjects' %}">📚 Предметы</a>
+        <a href="{% url 'teachers' %}">👩‍🏫 Учителя</a>
+        <a href="{% url 'classes' %}">🏫 Классы</a>
+        <a href="{% url 'holidays' %}">📆 Выходные дни</a>
+        <a href="{% url 'generate_schedule' %}">Генерация расписания</a>
+    </div>
+
+    <div class="content">
+        {% block content %}
+        {% endblock %}
+    </div>
+</body>
+</html>

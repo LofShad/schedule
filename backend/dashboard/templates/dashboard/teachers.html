@@ -1,0 +1,121 @@
+{% extends "dashboard/base.html" %}
+{% load static %}
+{% load dashboard_filters %}
+{% block title %}Учителя{% endblock %}
+
+{% block content %}
+<div style="display: flex; gap: 40px;">
+    <!-- Список учителей -->
+    <div style="width: 55%;">
+        <h2>👩‍🏫 Список учителей</h2>
+        <table border="1" cellpadding="8" cellspacing="0" width="100%">
+            <thead>
+                <tr>
+                    <th>ФИО</th>
+                    <th>Предметы</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for teacher in teachers %}
+                <tr>
+                    <td>{{ teacher.last_name }} {{ teacher.first_name }} {{ teacher.middle_name }}</td>
+                    <td>
+                        {% for subj in teacher.subjects.all %}
+                            {{ subj.name }}{% if not forloop.last %}, {% endif %}
+                        {% endfor %}
+                    </td>
+                    <td>
+                        <a href="?edit={{ teacher.id }}">✏️</a>
+                        <a href="?delete={{ teacher.id }}" onclick="return confirm('Удалить учителя?')">🗑️</a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="3">Нет учителей</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Форма справа -->
+    <div style="width: 45%;">
+        <h2>{{ edit_mode|yesno:"✏️ Редактировать учителя,➕ Добавить учителя" }}</h2>
+        <form method="post">
+            {% csrf_token %}
+            {% if edit_id %}
+            <input type="hidden" name="teacher_id" value="{{ edit_id }}">
+            {% endif %}
+
+            {{ form.non_field_errors }}
+
+            
+            <label>Фамилия</label> {{ form.last_name }}
+            <label>Имя</label> {{ form.first_name }}
+            <label>Отчество</label> {{ form.middle_name }}
+            <br><br>
+            <label>Логин</label> {{ form.username }}
+            <label>Пароль</label> {{ form.password }}
+            
+
+            <h4>Предметы:</h4>
+            {% for area, subjects in form.subjects_by_area.items %}
+                <details open style="margin-bottom: 10px;">
+                    <summary><strong>{{ area }}</strong></summary>
+                    {% for subject in subjects %}
+                        <label style="display: block; margin-left: 15px;">
+                            <input type="checkbox" name="subjects" value="{{ subject.id }}"
+                                   {% if subject.id|stringformat:"s" in selected_subjects %}checked{% endif %}>
+                            {{ subject.name }}
+                        </label>
+                    {% endfor %}
+                </details>
+            {% endfor %}
+
+            <h4>Рабочее время:</h4>
+
+            <label style="display: inline-block; margin-bottom: 10px;">
+                <input type="checkbox" id="select_all_time"> Работает все дни и все уроки
+            </label>
+
+            <table border="1" cellpadding="5">
+                <thead>
+                    <tr>
+                        <th>Урок / День</th>
+                        {% for day in weekdays %}
+                        <th>{{ day }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for lesson in lessons %}
+                    <tr>
+                        <td>{{ lesson }}</td>
+                        {% for day in weekdays %}
+                        <td>
+                            <input type="checkbox"
+                                class="worktime-checkbox"
+                                name="wt_{{ day }}_{{ lesson }}"
+                                {% if teacher and teacher.work_time|get_item:day and lesson in teacher.work_time|get_item:day %}checked{% endif %}>
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <br><button type="submit">💾 Сохранить</button>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const toggle = document.getElementById("select_all_time");
+            const checkboxes = document.querySelectorAll(".worktime-checkbox");
+
+            toggle.addEventListener("change", function () {
+                checkboxes.forEach(cb => cb.checked = toggle.checked);
+            });
+        });
+    </script>
+</div>
+{% endblock %}
