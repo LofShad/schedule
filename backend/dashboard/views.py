@@ -16,10 +16,6 @@ def home(request):
     return render(request, "dashboard/home.html")
 
 
-def schedule_view(request):
-    return render(request, "dashboard/schedule.html")
-
-
 def study_plans_view(request):
     active_tab = request.GET.get("tab", "5")
     study_plan, _ = StudyPlan.objects.get_or_create(name=active_tab)

@@ -11,7 +11,6 @@
                 <tr>
                     <th>Название</th>
                     <th>Предметная область</th>
-                    <th>Сложность</th>
                     <th>Действия</th>
                 </tr>
             </thead>
@@ -20,7 +19,6 @@
                 <tr>
                     <td>{{ subject.name }}</td>
                     <td>{{ subject.get_subject_area_display }}</td>
-                    <td>{{ subject.get_difficulty_display }}</td>
                     <td>
                         <a href="?edit={{ subject.id }}">✏️</a>
                         <a href="?delete={{ subject.id }}" onclick="return confirm('Удалить предмет?')">🗑️</a>
@@ -47,9 +45,6 @@
 
             <label>Предметная область:</label><br>
             {{ form.subject_area }}<br><br>
-
-            <label>Сложность:</label><br>
-            {{ form.difficulty }}<br><br>
 
             <button type="submit">💾 Сохранить</button>
         </form>

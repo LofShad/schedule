@@ -1,3 +1,4 @@
+
 from ortools.sat.python import cp_model
 from schedule.models import SchoolClass, Subject, SubjectHours, Lesson
 from users.models import Teacher
@@ -100,12 +101,8 @@ def generate_schedule():
                 prev_var = schedule_vars[cls.id][(day, available_lessons[i - 1])]
                 curr_var = schedule_vars[cls.id][(day, available_lessons[i])]
                 for hard_idx in hard_subject_indexes:
-                    b1 = model.NewBoolVar(
-                        f"hard_seq1_cls{cls.id}_d{day}_l{i}_subj{hard_idx}"
-                    )
-                    b2 = model.NewBoolVar(
-                        f"hard_seq2_cls{cls.id}_d{day}_l{i}_subj{hard_idx}"
-                    )
+                    b1 = model.NewBoolVar(f"hard_seq1_cls{cls.id}_d{day}_l{i}_subj{hard_idx}")
+                    b2 = model.NewBoolVar(f"hard_seq2_cls{cls.id}_d{day}_l{i}_subj{hard_idx}")
                     model.Add(prev_var == hard_idx).OnlyEnforceIf(b1)
                     model.Add(prev_var != hard_idx).OnlyEnforceIf(b1.Not())
                     model.Add(curr_var == hard_idx).OnlyEnforceIf(b2)
@@ -118,20 +115,12 @@ def generate_schedule():
                 curr_lesson = available_lessons[i]
                 prev_var = schedule_vars[cls.id][(day, prev_lesson)]
                 curr_var = schedule_vars[cls.id][(day, curr_lesson)]
-                is_curr_filled = model.NewBoolVar(
-                    f"filled_cls{cls.id}_d{day}_l{curr_lesson}"
-                )
-                is_prev_filled = model.NewBoolVar(
-                    f"filled_cls{cls.id}_d{day}_l{prev_lesson}"
-                )
+                is_curr_filled = model.NewBoolVar(f"filled_cls{cls.id}_d{day}_l{curr_lesson}")
+                is_prev_filled = model.NewBoolVar(f"filled_cls{cls.id}_d{day}_l{prev_lesson}")
                 model.Add(curr_var != FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_curr_filled)
-                model.Add(curr_var == FAKE_SUBJECT_INDEX).OnlyEnforceIf(
-                    is_curr_filled.Not()
-                )
+                model.Add(curr_var == FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_curr_filled.Not())
                 model.Add(prev_var != FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_prev_filled)
-                model.Add(prev_var == FAKE_SUBJECT_INDEX).OnlyEnforceIf(
-                    is_prev_filled.Not()
-                )
+                model.Add(prev_var == FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_prev_filled.Not())
                 model.AddImplication(is_curr_filled, is_prev_filled)
 
             if 7 in available_lessons:
@@ -156,35 +145,26 @@ def generate_schedule():
                     if (cls.id, subj_id) not in teacher_assignment:
                         continue
                     assign_var = teacher_assignment[(cls.id, subj_id)][t_idx]
-                    b = model.NewBoolVar(
-                        f"teach_cls{cls.id}_d{day}_l{lesson}_t{teacher.id}"
-                    )
+                    b = model.NewBoolVar(f"teach_cls{cls.id}_d{day}_l{lesson}_t{teacher.id}")
                     model.Add(var == subj_idx).OnlyEnforceIf([assign_var, b])
                     model.AddImplication(b, assign_var)
 
                     key = (teacher.id, day, lesson)
                     if key not in all_teacher_lessons:
-                        all_teacher_lessons[key] = model.NewBoolVar(
-                            f"busy_t{teacher.id}_d{day}_l{lesson}"
-                        )
+                        all_teacher_lessons[key] = model.NewBoolVar(f"busy_t{teacher.id}_d{day}_l{lesson}")
                     model.AddImplication(b, all_teacher_lessons[key])
 
     for (t_id, day, lesson), bvar in all_teacher_lessons.items():
-        model.Add(
-            sum(
-                1
-                for (tid, d, l), v in all_teacher_lessons.items()
-                if tid == t_id and d == day and l == lesson and v is bvar
-            )
-            <= 1
-        )
+        model.Add(sum(
+            1 for (tid, d, l), v in all_teacher_lessons.items()
+            if tid == t_id and d == day and l == lesson and v is bvar
+        ) <= 1)
 
     model.Minimize(sum(penalty_vars))
 
     solver = cp_model.CpSolver()
     solver.parameters.log_search_progress = True
-    solver.parameters.num_search_workers = 3
-    solver.parameters.max_time_in_seconds = 60
+    solver.parameters.num_search_workers = 1
 
     class SolutionPrinter(cp_model.CpSolverSolutionCallback):
         def __init__(self):
