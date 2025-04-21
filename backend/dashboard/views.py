@@ -13,6 +13,8 @@ CLASS_TABS = ["5", "6", "7", "8", "9", "10", "10С", "10М", "11", "11С", "11М
 
 
 def home(request):
+    if not request.session.get("is_admin"):
+        return redirect("login")
     return render(request, "dashboard/home.html")
 
 
@@ -260,7 +262,7 @@ def generate_schedule_view(request):
             messages.success(request, "Расписание успешно сгенерировано!")
         except Exception as e:
             messages.error(request, f"Ошибка при генерации: {str(e)}")
-        return redirect("generate_schedule")
+        return redirect("schedule")
 
     # Показываем текущее расписание
     all_lessons = Lesson.objects.select_related(
@@ -290,3 +292,17 @@ def generate_schedule_view(request):
         "dashboard/generate_schedule.html",
         {"grouped": grouped, "max_lessons": max_lessons, "shift_map": shift_map},
     )
+
+
+def login_view(request):
+    if request.method == "POST":
+        username = request.POST.get("username")
+        password = request.POST.get("password")
+        if username == "admin" and password == "admin":
+            request.session["is_admin"] = True
+            return redirect("dashboard-home")
+        else:
+            return render(
+                request, "dashboard/login.html", {"error": "Неверный логин или пароль"}
+            )
+    return render(request, "dashboard/login.html")

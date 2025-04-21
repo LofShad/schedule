@@ -1,204 +1,231 @@
-
+import logging
 from ortools.sat.python import cp_model
-from schedule.models import SchoolClass, Subject, SubjectHours, Lesson
-from users.models import Teacher
 from django.db import transaction
-import datetime
-import random
 
-DAYS = 6  # Пн–Сб
-LESSONS_PER_SHIFT = {
-    "1": list(range(1, 8)),  # первая смена: уроки 1–7
-    "2": list(range(8, 14)),  # уроки 8–13
-}
+from schedule.models import SchoolClass, SubjectHours, Room, Lesson, Subject, Shift
+from users.models import Teacher
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Schedule parameters
+WEEKDAYS = list(range(1, 7))  # Mon(1)–Sat(6)
+FIRST_SHIFT_SLOTS = list(range(1, 8))  # Lessons 1–7
+SECOND_SHIFT_SLOTS = list(range(8, 14))  # Lessons 8–13
 
 
 def generate_schedule():
-    model = cp_model.CpModel()
+    """
+    Generate balanced weekly schedule using CP-SAT solver.
+    Raises Exception if validation fails or no solution found.
+    """
+    logger.info("Starting balanced schedule generation...")
 
-    classes = list(SchoolClass.objects.select_related("grade", "study_plan").all())
-    subjects = list(Subject.objects.all())
-    subject_index = {s.id: i for i, s in enumerate(subjects)}
-    index_to_subject = {i: s for i, s in enumerate(subjects)}
-    FAKE_SUBJECT_INDEX = len(subjects)
+    # 1) Clear existing lessons
+    deleted, _ = Lesson.objects.all().delete()
+    logger.info(f"Cleared {deleted} previous lessons.")
 
+    # 2) Load data
+    classes = list(SchoolClass.objects.all())
+    hours_map = {
+        (sh.school_class_id, sh.subject_id): sh.hours_per_week
+        for sh in SubjectHours.objects.all()
+    }
     teachers = list(Teacher.objects.prefetch_related("subjects").all())
-    subject_teachers = {
-        subj.id: [t for t in teachers if subj in t.subjects.all()] for subj in subjects
+    rooms = list(Room.objects.all())
+
+    # 3) Determine slots per class based on shift
+    class_slots = {
+        cls.id: FIRST_SHIFT_SLOTS if cls.shift == Shift.FIRST else SECOND_SHIFT_SLOTS
+        for cls in classes
+    }
+    total_slots = {
+        Shift.FIRST: len(WEEKDAYS) * len(FIRST_SHIFT_SLOTS),
+        Shift.SECOND: len(WEEKDAYS) * len(SECOND_SHIFT_SLOTS),
     }
 
-    schedule_vars = {}
-    teacher_assignment = {}
-    all_teacher_lessons = {}
-    penalty_vars = []
-
-    for cls in classes:
-        SubjectHours.objects.filter(school_class=cls).delete()
-        Lesson.objects.filter(school_class=cls).delete()
-
-        study_plan = cls.study_plan
-        if study_plan:
-            for row in study_plan.entries.all():
-                SubjectHours.objects.create(
-                    school_class=cls,
-                    subject=row.subject,
-                    hours_per_week=row.hours_per_week,
-                )
-
-        shift_key = str(cls.shift)
-        available_lessons = LESSONS_PER_SHIFT[shift_key]
-
-        schedule_vars[cls.id] = {}
-
-        class_subject_ids = set(
-            p.subject.id for p in SubjectHours.objects.filter(school_class=cls)
-        )
-        allowed_subject_indexes = sorted(
-            set(subject_index[sid] for sid in class_subject_ids)
-        )
-        allowed_subject_indexes.append(FAKE_SUBJECT_INDEX)
-
-        for day in range(DAYS):
-            for lesson in available_lessons:
-                var = model.NewIntVarFromDomain(
-                    cp_model.Domain.FromValues(allowed_subject_indexes),
-                    f"class{cls.id}_d{day}_l{lesson}",
-                )
-                schedule_vars[cls.id][(day, lesson)] = var
-
-        for subj_id, hours in {
-            p.subject.id: p.hours_per_week
-            for p in SubjectHours.objects.filter(school_class=cls)
-        }.items():
-            subj_idx = subject_index[subj_id]
-            bools = []
-            for (day, lesson), var in schedule_vars[cls.id].items():
-                b = model.NewBoolVar(f"cls{cls.id}_subj{subj_id}_d{day}_l{lesson}")
-                model.Add(var == subj_idx).OnlyEnforceIf(b)
-                model.Add(var != subj_idx).OnlyEnforceIf(b.Not())
-                bools.append(b)
-            model.Add(sum(bools) == hours)
-
-            available_teachers = subject_teachers.get(subj_id, [])
-            if available_teachers:
-                teacher_vars = []
-                for teacher in available_teachers:
-                    t_var = model.NewBoolVar(
-                        f"assign_cls{cls.id}_subj{subj_id}_teacher{teacher.id}"
-                    )
-                    teacher_vars.append(t_var)
-                model.AddExactlyOne(teacher_vars)
-                teacher_assignment[(cls.id, subj_id)] = teacher_vars
-
-        hard_subject_indexes = [
-            subject_index[s.id]
-            for s in Subject.objects.filter(difficulty="hard")
-            if s.id in subject_index
-        ]
-
-        for day in range(DAYS):
-            for i in range(1, len(available_lessons)):
-                prev_var = schedule_vars[cls.id][(day, available_lessons[i - 1])]
-                curr_var = schedule_vars[cls.id][(day, available_lessons[i])]
-                for hard_idx in hard_subject_indexes:
-                    b1 = model.NewBoolVar(f"hard_seq1_cls{cls.id}_d{day}_l{i}_subj{hard_idx}")
-                    b2 = model.NewBoolVar(f"hard_seq2_cls{cls.id}_d{day}_l{i}_subj{hard_idx}")
-                    model.Add(prev_var == hard_idx).OnlyEnforceIf(b1)
-                    model.Add(prev_var != hard_idx).OnlyEnforceIf(b1.Not())
-                    model.Add(curr_var == hard_idx).OnlyEnforceIf(b2)
-                    model.Add(curr_var != hard_idx).OnlyEnforceIf(b2.Not())
-                    model.AddBoolOr([b1.Not(), b2.Not()])
-
-        for day in range(DAYS):
-            for i in range(1, len(available_lessons)):
-                prev_lesson = available_lessons[i - 1]
-                curr_lesson = available_lessons[i]
-                prev_var = schedule_vars[cls.id][(day, prev_lesson)]
-                curr_var = schedule_vars[cls.id][(day, curr_lesson)]
-                is_curr_filled = model.NewBoolVar(f"filled_cls{cls.id}_d{day}_l{curr_lesson}")
-                is_prev_filled = model.NewBoolVar(f"filled_cls{cls.id}_d{day}_l{prev_lesson}")
-                model.Add(curr_var != FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_curr_filled)
-                model.Add(curr_var == FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_curr_filled.Not())
-                model.Add(prev_var != FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_prev_filled)
-                model.Add(prev_var == FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_prev_filled.Not())
-                model.AddImplication(is_curr_filled, is_prev_filled)
-
-            if 7 in available_lessons:
-                var7 = schedule_vars[cls.id][(day, 7)]
-                is_used = model.NewBoolVar(f"seventh_cls{cls.id}_d{day}")
-                model.Add(var7 != FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_used)
-                model.Add(var7 == FAKE_SUBJECT_INDEX).OnlyEnforceIf(is_used.Not())
-                penalty_vars.append(is_used)
-
-    for cls in classes:
-        for (day, lesson), var in schedule_vars[cls.id].items():
-            for subj_idx, subj in index_to_subject.items():
-                if subj_idx == FAKE_SUBJECT_INDEX:
-                    continue
-                subj_id = subj.id
-                if subj_id not in subject_teachers:
-                    continue
-                teachers_for_subj = subject_teachers[subj_id]
-                if not teachers_for_subj:
-                    continue
-                for t_idx, teacher in enumerate(teachers_for_subj):
-                    if (cls.id, subj_id) not in teacher_assignment:
-                        continue
-                    assign_var = teacher_assignment[(cls.id, subj_id)][t_idx]
-                    b = model.NewBoolVar(f"teach_cls{cls.id}_d{day}_l{lesson}_t{teacher.id}")
-                    model.Add(var == subj_idx).OnlyEnforceIf([assign_var, b])
-                    model.AddImplication(b, assign_var)
-
-                    key = (teacher.id, day, lesson)
-                    if key not in all_teacher_lessons:
-                        all_teacher_lessons[key] = model.NewBoolVar(f"busy_t{teacher.id}_d{day}_l{lesson}")
-                    model.AddImplication(b, all_teacher_lessons[key])
-
-    for (t_id, day, lesson), bvar in all_teacher_lessons.items():
-        model.Add(sum(
-            1 for (tid, d, l), v in all_teacher_lessons.items()
-            if tid == t_id and d == day and l == lesson and v is bvar
-        ) <= 1)
-
-    model.Minimize(sum(penalty_vars))
-
-    solver = cp_model.CpSolver()
-    solver.parameters.log_search_progress = True
-    solver.parameters.num_search_workers = 1
-
-    class SolutionPrinter(cp_model.CpSolverSolutionCallback):
-        def __init__(self):
-            cp_model.CpSolverSolutionCallback.__init__(self)
-            self.solution_count = 0
-
-        def on_solution_callback(self):
-            self.solution_count += 1
-
-    printer = SolutionPrinter()
-    status = solver.Solve(model, printer)
-    print(f"Решений найдено: {printer.solution_count}")
-
-    if status not in [cp_model.FEASIBLE, cp_model.OPTIMAL]:
-        print("\n=== НЕ УДАЛОСЬ СОСТАВИТЬ РАСПИСАНИЕ ===")
-        raise Exception("Невозможно составить расписание")
-
-    for cls in classes:
-        for (day, lesson), var in schedule_vars[cls.id].items():
-            subj_idx = solver.Value(var)
-            if subj_idx == FAKE_SUBJECT_INDEX:
-                continue
-            subject = subjects[subj_idx]
-            assigned_teacher = None
-            if (cls.id, subject.id) in teacher_assignment:
-                teacher_vars = teacher_assignment[(cls.id, subject.id)]
-                for i, t_var in enumerate(teacher_vars):
-                    if solver.BooleanValue(t_var):
-                        assigned_teacher = subject_teachers[subject.id][i]
-                        break
-            Lesson.objects.create(
-                school_class=cls,
-                subject=subject,
-                teacher=assigned_teacher,
-                weekday=day + 1,
-                lesson_number=lesson,
+    # 4) Data validation
+    errors = False
+    # 4.1) Class-subject hours fit into available slots per shift
+    for (c_id, s_id), hrs in hours_map.items():
+        cls_obj = next(c for c in classes if c.id == c_id)
+        available = total_slots[cls_obj.shift]
+        if hrs > available:
+            subj = Subject.objects.get(id=s_id)
+            logger.error(
+                f"{subj.name} for {cls_obj} requires {hrs}h, only {available} slots available"
             )
+            errors = True
+
+    # 4.2) Subject-level teacher capacity
+    from collections import defaultdict
+
+    subj_hours = defaultdict(int)
+    for (c_id, s_id), hrs in hours_map.items():
+        subj_hours[s_id] += hrs
+    for s_id, need in subj_hours.items():
+        qualified = [t for t in teachers if s_id in {s.id for s in t.subjects.all()}]
+        if not qualified:
+            subj = Subject.objects.get(id=s_id)
+            logger.error(f"No teachers for subject {subj.name}")
+            errors = True
+            continue
+        capacity = sum(
+            t.work_time.get("max_hours_per_week", total_slots[Shift.SECOND])
+            for t in qualified
+        )
+        if need > capacity:
+            subj = Subject.objects.get(id=s_id)
+            logger.error(
+                f"{subj.name} needs {need}h, total capacity {capacity}h from {len(qualified)} teachers"
+            )
+            errors = True
+
+    if errors:
+        raise Exception("Data validation failed. Fix errors and rerun.")
+
+    # 5) Build CP-SAT model
+    model = cp_model.CpModel()
+    y = {}
+    z = {}
+    teacher_subjects = {t.id: {s.id for s in t.subjects.all()} for t in teachers}
+    for cls in classes:
+        slots = class_slots[cls.id]
+        for (c_id, s_id), hrs in hours_map.items():
+            if c_id != cls.id:
+                continue
+            for t in teachers:
+                if s_id not in teacher_subjects[t.id]:
+                    continue
+                # z enforces one teacher per class-subject
+                z[(c_id, s_id, t.id)] = model.NewBoolVar(f"z_c{c_id}_s{s_id}_t{t.id}")
+                for d in WEEKDAYS:
+                    for l in slots:
+                        y[(c_id, s_id, t.id, d, l)] = model.NewBoolVar(
+                            f"y_c{c_id}_s{s_id}_t{t.id}_d{d}_l{l}"
+                        )
+                        model.Add(y[(c_id, s_id, t.id, d, l)] <= z[(c_id, s_id, t.id)])
+
+    # 5.2) One teacher per class-subject
+    for (c_id, s_id), hrs in hours_map.items():
+        teacher_vars = [
+            z[(c_id, s_id, t.id)] for t in teachers if (c_id, s_id, t.id) in z
+        ]
+        model.Add(sum(teacher_vars) == 1)
+
+    # 5.3) Hours per plan
+    for (c_id, s_id), hrs in hours_map.items():
+        lesson_vars = [
+            var
+            for var_key, var in y.items()
+            if var_key[0] == c_id and var_key[1] == s_id
+        ]
+        model.Add(sum(lesson_vars) == hrs)
+
+    # 5.4) FGOS: at most one lesson of same subject per day
+    for (c_id, s_id), hrs in hours_map.items():
+        slots = class_slots[c_id]
+        for d in WEEKDAYS:
+            daily_vars = [
+                y[(c_id, s_id, t.id, d, l)]
+                for t in teachers
+                for l in slots
+                if (c_id, s_id, t.id, d, l) in y
+            ]
+            model.Add(sum(daily_vars) <= 1)
+            if hrs == len(WEEKDAYS):
+                model.Add(sum(daily_vars) == 1)
+
+    # 5.5) One lesson per class per slot
+    for cls in classes:
+        slots = class_slots[cls.id]
+        for d in WEEKDAYS:
+            for l in slots:
+                slot_vars = [
+                    y[key]
+                    for key in y
+                    if key[0] == cls.id and key[3] == d and key[4] == l
+                ]
+                model.Add(sum(slot_vars) <= 1)
+
+    # 5.6) Teacher constraints
+    for t in teachers:
+        max_h = t.work_time.get("max_hours_per_week", total_slots[Shift.SECOND])
+        for shift_val in [Shift.FIRST, Shift.SECOND]:
+            slots = (
+                FIRST_SHIFT_SLOTS if shift_val == Shift.FIRST else SECOND_SHIFT_SLOTS
+            )
+            cls_ids = [c.id for c in classes if c.shift == shift_val]
+            for d in WEEKDAYS:
+                for l in slots:
+                    t_vars = [
+                        y[(c, s, t.id, d, l)]
+                        for (c, s, t_id, dd, ll) in y
+                        if t_id == t.id and c in cls_ids and dd == d and ll == l
+                    ]
+                    model.Add(sum(t_vars) <= 1)
+        # Weekly load
+        week_vars = [var for key, var in y.items() if key[2] == t.id]
+        model.Add(sum(week_vars) <= max_h)
+
+    # 5.7) No gaps per class/day
+    for cls in classes:
+        slots = class_slots[cls.id]
+        for d in WEEKDAYS:
+            for idx in range(1, len(slots)):
+                curr, prev = slots[idx], slots[idx - 1]
+                curr_vars = [
+                    y[(cls.id, s, t, d, curr)]
+                    for (c, s, t, dd, ll) in y
+                    if c == cls.id and dd == d and ll == curr
+                ]
+                prev_vars = [
+                    y[(cls.id, s, t, d, prev)]
+                    for (c, s, t, dd, ll) in y
+                    if c == cls.id and dd == d and ll == prev
+                ]
+                model.Add(sum(curr_vars) <= sum(prev_vars))
+
+    # 5.8) Balance lessons across the week (minimize imbalance)
+    Lmax = {}
+    Lmin = {}
+    for cls in classes:
+        slots = class_slots[cls.id]
+        Lmax[cls.id] = model.NewIntVar(0, len(slots), f"Lmax_c{cls.id}")
+        Lmin[cls.id] = model.NewIntVar(0, len(slots), f"Lmin_c{cls.id}")
+        for d in WEEKDAYS:
+            day_vars = [
+                y[(cls.id, s, t, d, l)]
+                for (c, s, t, dd, l) in y
+                if c == cls.id and dd == d
+            ]
+            model.Add(sum(day_vars) <= Lmax[cls.id])
+            model.Add(sum(day_vars) >= Lmin[cls.id])
+    model.Minimize(sum(Lmax[c.id] - Lmin[c.id] for c in classes))
+
+    # 6) Solve
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 180
+    solver.parameters.log_search_progress = True
+    solver.parameters.num_search_workers = 8
+    status = solver.Solve(model)
+
+    logger.info(f"CP-SAT status: {solver.StatusName(status)}")
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        raise Exception("No solution found.")
+
+    # 7) Save schedule
+    with transaction.atomic():
+        for key, var in y.items():
+            if solver.Value(var):
+                c_id, s_id, t_id, d, l = key
+                room = rooms[0] if rooms else None
+                Lesson.objects.create(
+                    school_class_id=c_id,
+                    subject_id=s_id,
+                    teacher_id=t_id,
+                    weekday=d,
+                    lesson_number=l,
+                    room=room,
+                )
+    logger.info("Balanced schedule generated successfully.")

@@ -1,7 +1,6 @@
 from django.db import models
 
 
-
 class Shift(models.TextChoices):
     FIRST = "1", "Первая"
     SECOND = "2", "Вторая"
